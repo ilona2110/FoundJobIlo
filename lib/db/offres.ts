@@ -3,6 +3,7 @@ import { getDb, asJson, parseJson } from "./index";
 import type { ScrapedOffre } from "@/lib/scrapers/base";
 import type { ScoreResult } from "@/lib/ai/score-offre";
 import { classifyContract, CONTRACT_ORDER, type ContractCategory } from "@/lib/contracts";
+import { isInArea, type ZoneArea } from "@/lib/geo/haute-garonne";
 
 export type { ScrapedOffre };
 
@@ -56,6 +57,10 @@ export type OffreSummary = Pick<
 
 export type OffersSort = "smart" | "newest" | "oldest" | "score";
 
+/** Filtre « Publiées » : aujourd'hui, 7 derniers jours, 14 derniers jours. */
+export type OffersPublished = "today" | "week" | "2weeks";
+export const PUBLISHED_DAYS: Record<OffersPublished, number> = { today: 1, week: 7, "2weeks": 14 };
+
 export type OffersSearch = {
   offers: OffreSummary[];
   total: number;
@@ -66,6 +71,10 @@ export type OffersSearch = {
     sources: string[];
     contractCounts: Record<ContractCategory, number>;
     hasVie: boolean;
+    /** Offres publiées (ou découvertes) aujourd'hui, en 7 jours, en 14 jours. */
+    publishedCounts: Record<OffersPublished, number>;
+    /** Offres à Toulouse même, dans Toulouse Métropole. */
+    areaCounts: Record<ZoneArea, number>;
   };
 };
 
@@ -97,6 +106,10 @@ type CachedOffre = Omit<OffreSummary, "description_text" | "score_reason"> & {
   excerpt: string;
   /** JSON brut, lu seulement pour les offres de la page renvoyée. */
   score_breakdown: string | null;
+  /** Date de publication, ou à défaut de découverte, au format AAAA-MM-JJ (heure locale). */
+  date_key: string | null;
+  in_toulouse: boolean;
+  in_metropole: boolean;
 };
 
 type OffresCache = {
@@ -107,7 +120,7 @@ type OffresCache = {
   orderedAt: number;
   /** Titre, entreprise, pays, lieu et description complète, sans accents ; construit à la première recherche. */
   haystacks: Map<number, string> | null;
-  facets: OffersSearch["facets"];
+  facets: Omit<OffersSearch["facets"], "publishedCounts">;
 };
 
 const ORDER_TTL_MS = 60_000;
@@ -132,7 +145,10 @@ type CacheRow = Pick<
   OffreRow,
   "id" | "source" | "url" | "title" | "company" | "country" | "location" |
   "contract_type" | "description_status" | "posted_at" | "score" | "is_vie"
-> & { head: string | null; excerpt: string | null; score_breakdown: string | null; has_cv: number; has_lm: number };
+> & {
+  head: string | null; excerpt: string | null; score_breakdown: string | null; has_cv: number; has_lm: number;
+  first_seen_at: string | null;
+};
 
 function buildOffresCache(fingerprint: string): OffresCache {
   // La description entière ne remonte pas : 4 000 caractères suffisent à classer le
@@ -140,7 +156,7 @@ function buildOffresCache(fingerprint: string): OffresCache {
   // les 4 623 offres de référence) et l’aperçu en affiche 1 000.
   const rows = getDb().prepare(`
     SELECT o.id, o.source, o.url, o.title, o.company, o.country, o.location,
-      o.contract_type, o.description_status, o.posted_at, o.score, o.score_breakdown, o.is_vie,
+      o.contract_type, o.description_status, o.posted_at, o.first_seen_at, o.score, o.score_breakdown, o.is_vie,
       substr(o.description_text, 1, 4000) AS head,
       substr(o.description_text, 1, 1000) AS excerpt,
       EXISTS(SELECT 1 FROM documents WHERE offre_id = o.id AND type = 'cv') AS has_cv,
@@ -151,6 +167,7 @@ function buildOffresCache(fingerprint: string): OffresCache {
   const contractCounts = Object.fromEntries(CONTRACT_ORDER.map((contract) => [contract, 0])) as Record<ContractCategory, number>;
   const countries = new Set<string>();
   const sources = new Set<string>();
+  const areaCounts: Record<ZoneArea, number> = { toulouse: 0, metropole: 0 };
   const byId = new Map<number, CachedOffre>();
   const smart: CachedOffre[] = [];
   for (const row of rows) {
@@ -167,7 +184,12 @@ function buildOffresCache(fingerprint: string): OffresCache {
       // substr() compte des caractères, slice() des unités UTF-16 (émojis) : on
       // recoupe pour rendre exactement l’extrait d’avant.
       excerpt: (row.excerpt ?? "").slice(0, 1000), score_breakdown: row.score_breakdown,
+      date_key: offerDateKey(row.posted_at, row.first_seen_at),
+      in_toulouse: isInArea(row.location, "toulouse"),
+      in_metropole: isInArea(row.location, "metropole"),
     };
+    if (offer.in_toulouse) areaCounts.toulouse++;
+    if (offer.in_metropole) areaCounts.metropole++;
     byId.set(offer.id, offer);
     smart.push(offer);
   }
@@ -179,8 +201,33 @@ function buildOffresCache(fingerprint: string): OffresCache {
       sources: [...sources].sort(),
       contractCounts,
       hasVie: contractCounts.vie > 0,
+      areaCounts,
     },
   };
+}
+
+/** AAAA-MM-JJ d'une date, en heure locale. */
+function localDateKey(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/**
+ * Date utilisée par le filtre « Publiées » : la date de publication donnée par la source,
+ * sinon le jour où JobScout a vu l'offre pour la première fois (first_seen_at, en UTC).
+ */
+export function offerDateKey(postedAt: string | null, firstSeenAt: string | null): string | null {
+  if (postedAt && /^\d{4}-\d{2}-\d{2}/.test(postedAt)) return postedAt.slice(0, 10);
+  if (!firstSeenAt) return null;
+  const d = new Date(`${firstSeenAt.replace(" ", "T")}${/[zZ]|[+-]\d{2}:?\d{2}$/.test(firstSeenAt) ? "" : "Z"}`);
+  return Number.isNaN(d.getTime()) ? null : localDateKey(d);
+}
+
+/** Première date (AAAA-MM-JJ, heure locale) incluse dans la période. */
+export function publishedSince(published: OffersPublished, now = new Date()): string {
+  const d = new Date(now);
+  d.setDate(d.getDate() - (PUBLISHED_DAYS[published] - 1));
+  return localDateKey(d);
 }
 
 function getOffresCache(): OffresCache {
@@ -231,15 +278,30 @@ export function searchOffres(opts: {
   minScore?: boolean | number;
   /** Raccourci de ?vie=1 : même règle que la puce contrat « V.I.E » (contract_category). */
   vieOnly?: boolean;
+  /** Publiées aujourd'hui / en 7 jours / en 14 jours. */
+  published?: OffersPublished;
+  /** Toulouse même, ou Toulouse Métropole. */
+  area?: ZoneArea;
   sortBy?: OffersSort;
   page?: number;
+  now?: Date;
 } = {}): OffersSearch {
   const cache = getOffresCache();
   const query = normalizeSearch((opts.query ?? "").trim());
   const haystacks = query ? getHaystacks(cache) : null;
   const contracts = new Set(opts.contracts ?? []);
   const minScore = opts.minScore === true ? 60 : typeof opts.minScore === "number" ? opts.minScore : 0;
+  const since = opts.published ? publishedSince(opts.published, opts.now) : null;
+  const publishedCounts: Record<OffersPublished, number> = { today: 0, week: 0, "2weeks": 0 };
+  const sinceKeys = (Object.keys(PUBLISHED_DAYS) as OffersPublished[]).map((k) => [k, publishedSince(k, opts.now)] as const);
+  for (const row of cache.smart) {
+    if (!row.date_key) continue;
+    for (const [k, from] of sinceKeys) if (row.date_key >= from) publishedCounts[k]++;
+  }
   const filtered = cache.smart.filter((row) => {
+    if (since && (!row.date_key || row.date_key < since)) return false;
+    if (opts.area === "toulouse" && !row.in_toulouse) return false;
+    if (opts.area === "metropole" && !row.in_metropole) return false;
     if (haystacks && !(haystacks.get(row.id) ?? "").includes(query)) return false;
     if (opts.source && row.source !== opts.source) return false;
     if (opts.country && row.country !== opts.country) return false;
@@ -274,7 +336,7 @@ export function searchOffres(opts: {
     })),
     total: filtered.length,
     pageSize: OFFER_PAGE_SIZE,
-    facets: cache.facets,
+    facets: { ...cache.facets, publishedCounts },
   };
 }
 
@@ -308,9 +370,9 @@ export function upsertOffreFromSource(source: string, o: ScrapedOffre): number {
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO offres (source, source_id, url, title, company, country, location, contract_type, salary,
-      description_html, description_text, description_status, posted_at, is_vie, raw_payload, scrape_errors)
+      description_html, description_text, description_status, posted_at, is_vie, raw_payload, scrape_errors, first_seen_at)
     VALUES (@source, @source_id, @url, @title, @company, @country, @location, @contract_type, @salary,
-      @description_html, @description_text, @description_status, @posted_at, @is_vie, @raw_payload, @scrape_errors)
+      @description_html, @description_text, @description_status, @posted_at, @is_vie, @raw_payload, @scrape_errors, datetime('now'))
     ON CONFLICT(source, source_id) DO UPDATE SET
       url = excluded.url,
       title = excluded.title,
@@ -322,7 +384,8 @@ export function upsertOffreFromSource(source: string, o: ScrapedOffre): number {
       description_html = excluded.description_html,
       description_text = excluded.description_text,
       description_status = excluded.description_status,
-      posted_at = excluded.posted_at,
+      -- Une source qui ne donne plus la date ne l'efface pas.
+      posted_at = COALESCE(excluded.posted_at, offres.posted_at),
       is_vie = excluded.is_vie,
       raw_payload = excluded.raw_payload,
       scrape_errors = excluded.scrape_errors,
