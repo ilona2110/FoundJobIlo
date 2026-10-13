@@ -2,6 +2,7 @@ import "server-only";
 import type { Scraper, ScrapedOffre, ScrapeCriteria, ProgressEvent } from "./base";
 import { htmlToText } from "./base";
 import { detectVie } from "@/lib/vie";
+import { ZONE_DEPARTEMENT } from "@/lib/geo/haute-garonne";
 import {
   parseDocument,
   firstMatchHtml,
@@ -114,13 +115,19 @@ function apiJobToScraped(job: FtApiJob): ScrapedOffre | null {
   };
 }
 
-async function fetchApi(keywords: string, start: number, size: number): Promise<FtApiJob[]> {
+/** Département de la zone visée (Haute-Garonne → 31), transmis aux recherches France Travail. */
+function zoneDepartement(criteria: ScrapeCriteria): string | null {
+  return criteria.zone ? ZONE_DEPARTEMENT : null;
+}
+
+async function fetchApi(keywords: string, start: number, size: number, departement: string | null): Promise<FtApiJob[]> {
   const token = await getToken();
   if (!token) return [];
   const params = new URLSearchParams({
     motsCles: keywords,
     range: `${start}-${start + size - 1}`,
   });
+  if (departement) params.set("departement", departement);
   const res = await fetch(`${API_BASE}/offres/search?${params}`, {
     headers: { accept: "application/json", authorization: `Bearer ${token}` },
   });
@@ -176,12 +183,14 @@ function parseHtmlSearch(html: string): HtmlCard[] {
   return out;
 }
 
-async function fetchHtmlPage(keywords: string, page: number): Promise<HtmlCard[]> {
+async function fetchHtmlPage(keywords: string, page: number, departement: string | null): Promise<HtmlCard[]> {
   const params = new URLSearchParams({
     motsCles: keywords,
     offresPartenaires: "true",
     page: String(page),
   });
+  // Format du site candidat : « 31D » = tout le département 31.
+  if (departement) params.set("lieux", `${departement}D`);
   const res = await fetch(`${SEARCH_PAGE}?${params}`, { headers: BROWSER_HEADERS });
   if (!res.ok) throw new Error(`France Travail HTTP ${res.status}`);
   return parseHtmlSearch(await res.text());
@@ -248,7 +257,7 @@ export const francetravailScraper: Scraper = {
     for (const q of queries) {
       let start = 0;
       while (apiOffres.size < max && start < 150) {
-        const jobs = await fetchApi(q, start, 50);
+        const jobs = await fetchApi(q, start, 50, zoneDepartement(criteria));
         if (!jobs.length) break;
         for (const j of jobs) {
           const o = apiJobToScraped(j);
@@ -279,7 +288,7 @@ export const francetravailScraper: Scraper = {
     for (const q of queries) {
       for (let page = 1; page <= 3 && seen.size < max; page++) {
         try {
-          const cards = await fetchHtmlPage(q, page);
+          const cards = await fetchHtmlPage(q, page, zoneDepartement(criteria));
           if (!cards.length) break;
           for (const c of cards) if (!seen.has(c.id)) seen.set(c.id, c);
           if (cards.length < 10) break;

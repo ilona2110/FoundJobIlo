@@ -1,4 +1,6 @@
-# JobScout
+# FoundJobIlo
+
+Version personnelle de [JobScout](https://github.com/latenightsbeats1208-pixel/jobscout) (licence MIT), recentrée sur la **Haute-Garonne** : seules les offres situées dans le département 31 sont gardées, et les sites carrières d'Airbus (avec ATR), Safran, Thales, Capgemini, Accenture et Renault Group sont interrogés directement. Voir « [Zone Haute-Garonne et sites carrières](#zone-haute-garonne-et-sites-carrières) ».
 
 Trouvez des offres d'emploi grâce à un scan multi-plateformes, triez-les avec un score calculé sur votre vrai profil, et générez pour chacune un CV et une lettre de motivation d'une page (compatibles ATS), sans jamais inventer une compétence que vous n'avez pas.
 
@@ -30,8 +32,8 @@ Tout tourne sur votre machine : base SQLite locale, serveur limité à `127.0.0.
 Requiert **Node ≥ 22.13** (module `node:sqlite` sans drapeau expérimental ; Node 24 convient). Au démarrage, Node affiche `ExperimentalWarning: SQLite is an experimental feature` : c'est normal et sans effet.
 
 ```bash
-git clone https://github.com/latenightsbeats1208-pixel/jobscout.git
-cd jobscout
+git clone https://github.com/ilona2110/FoundJobIlo.git
+cd FoundJobIlo
 npm ci
 npm run dev
 ```
@@ -80,6 +82,26 @@ L'app démarre sur http://127.0.0.1:3000 (écoute limitée à la machine locale,
 **Avant d'activer une source, lisez les [conditions d'utilisation](CGU.md) (sections 5 et 6)** : les conditions de Welcome to the Jungle, HelloWork, Talent.com et LinkedIn interdisent l'extraction automatisée. C'est pourquoi, depuis la 3.4.13, seule France Travail est cochée d'office. Chaque source s'active ou se désactive dans Profil › Recherche › Sources (ou à l'étape Préférences de l'onboarding). Une source suspendue n'est jamais interrogée, même si elle est restée cochée dans un ancien profil. Une source hors périmètre géographique (ex. HelloWork quand le profil ne cible pas la France) est automatiquement sautée. La disponibilité des sources dépend des sites tiers (anti-bot, changements d'API) ; une source en échec est signalée dans le journal du scan.
 
 WTTJ est interrogée avec la clé de recherche (lecture seule) qu'utilise l'interface du site. Si elle cesse de fonctionner, décochez la source.
+
+## Zone Haute-Garonne et sites carrières
+
+**Seules les offres situées en Haute-Garonne (31) sont gardées**, quelle que soit la source. Le lieu de chaque offre est comparé aux 586 communes du département (code officiel géographique de l'Insee, `lib/geo/haute-garonne-communes.ts`), aux codes postaux `31xxx` et au numéro de département (« 31 - TOULOUSE », « Colomiers (31) »). Une offre sans lieu, ou dont le lieu est ambigu (homonyme sans précision), est écartée. Logique : `lib/geo/haute-garonne.ts`.
+
+- Au début de chaque scan, les offres déjà en base hors Haute-Garonne sont retirées, sauf celles liées à une candidature ou à un document généré.
+- France Travail cherche directement dans le département 31 ; HelloWork et LinkedIn cherchent « Haute-Garonne ». Les autres sources cherchent en France, puis le filtre s'applique.
+- Le journal du scan indique, par source, combien d'offres hors Haute-Garonne ont été ignorées.
+
+**Sites carrières interrogés directement** (cochés par défaut ; un profil existant les reçoit automatiquement au premier lancement, et on peut les décocher dans Profil › Recherche › Sources) :
+
+| Entreprise | Méthode |
+|---|---|
+| Airbus (avec ATR), Thales, Renault Group, Accenture | API JSON publique de leur site carrières Workday ; filtre de lieu Workday sur les communes du 31, sinon recherche par ville |
+| Capgemini | API JSON publique du moteur de recherche de capgemini.com (description complète incluse) |
+| Safran | Pages de safran-group.com/fr/offres (recherche par ville du 31, puis lecture de chaque offre) |
+
+Au plus 300 offres par entreprise et par scan. Pour ajouter une entreprise hébergée par Workday, ajoutez une ligne dans `lib/scrapers/careers/index.ts` et une entrée dans `lib/sources-meta.ts`.
+
+**Pas encore pris en charge** : Sopra Steria, CNES, Liebherr Aerospace et Aumovio (ex-Continental Automotive). Leurs sites carrières n'exposent ni API publique ni pages lisibles sans navigateur. Leurs offres arrivent souvent par France Travail, désormais limitée à la Haute-Garonne.
 
 ## Scoring des offres (local, déterministe, gratuit)
 

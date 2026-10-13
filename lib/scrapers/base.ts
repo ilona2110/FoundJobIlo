@@ -28,6 +28,8 @@ export type ScrapeCriteria = {
   sectors: string[];
   countries: string[];
   maxOffres?: number;
+  /** Zone géographique visée (« Haute-Garonne ») : les sources qui savent filtrer par lieu l'utilisent. */
+  zone?: string;
 };
 
 export type ProgressEvent =

@@ -87,8 +87,8 @@ function parseSearchPage(html: string): Card[] {
   return cards;
 }
 
-async function fetchSearchPage(keywords: string, page: number): Promise<Card[]> {
-  const params = new URLSearchParams({ k: keywords, l: "France" });
+async function fetchSearchPage(keywords: string, page: number, zone?: string): Promise<Card[]> {
+  const params = new URLSearchParams({ k: keywords, l: zone || "France" });
   if (page > 1) params.set("p", String(page));
   const res = await fetch(`${SEARCH_URL}?${params}`, { headers: BROWSER_HEADERS });
   if (!res.ok) throw new Error(`HelloWork HTTP ${res.status}`);
@@ -165,7 +165,7 @@ export const helloworkScraper: Scraper = {
     for (const q of queries) {
       for (let page = 1; page <= 3 && seen.size < max; page++) {
         try {
-          const cards = await fetchSearchPage(q, page);
+          const cards = await fetchSearchPage(q, page, criteria.zone);
           if (!cards.length) break;
           for (const c of cards) if (!seen.has(c.id)) seen.set(c.id, c);
           if (cards.length < 10) break;
