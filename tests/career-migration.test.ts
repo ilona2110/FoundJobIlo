@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { dbPath } from "@/lib/paths";
 
-/** Une base existante (profil avec France Travail seule) reçoit les sites carrières une seule fois. */
+/** Une base existante (profil avec France Travail seule) reçoit les sites carrières et les graduate programmes une seule fois. */
 describe("migration des sites carrières", () => {
   it("coche les sites carrières d'un profil existant, une seule fois", async () => {
     const file = dbPath();
@@ -27,5 +27,8 @@ describe("migration des sites carrières", () => {
       "renault",
     ]);
     expect(db.prepare("SELECT value FROM settings WHERE key = 'migration.career_sources'").get()).toEqual({ value: "1" });
+    // Graduate programmes ajoutés en tête des contrats recherchés.
+    const prefs = db.prepare("SELECT preferred_contracts FROM profile").get() as { preferred_contracts: string };
+    expect(JSON.parse(prefs.preferred_contracts)).toEqual(["graduate", "cdi", "cdd"]);
   });
 });

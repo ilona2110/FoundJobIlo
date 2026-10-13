@@ -3,7 +3,7 @@ import type { Scraper, ScrapedOffre, ScrapeCriteria, ProgressEvent } from "../ba
 import { htmlToText } from "../base";
 import { sleep } from "../dom";
 import { detectVie } from "@/lib/vie";
-import { isInHauteGaronne } from "@/lib/geo/haute-garonne";
+import { keepInZone } from "@/lib/geo/zone-policy";
 import { CAREERS_HEADERS, CAREERS_MAX_PER_COMPANY } from "./workday-parse";
 
 // Capgemini (dont Capgemini Engineering, Invent…) : le moteur de recherche de
@@ -32,9 +32,10 @@ export type CapgeminiJob = {
 export function capgeminiJobToOffre(j: CapgeminiJob): ScrapedOffre | null {
   const id = (j.id ?? "").trim();
   const title = (j.title ?? "").trim();
-  if (!id || !title || !isInHauteGaronne(j.location)) return null;
+  if (!id || !title) return null;
   const html = j.description ?? "";
   const text = htmlToText(html) || (j.description_stripped ?? "");
+  if (!keepInZone({ location: j.location ?? null, title, description_text: text, contract_type: j.contract_type })) return null;
   const url = j.apply_job_url || `https://www.capgemini.com/fr-fr/carrieres/`;
   const date = (j.indexed_at || j.updated_at || "").slice(0, 10);
   return {

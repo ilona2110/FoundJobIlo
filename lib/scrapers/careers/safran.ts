@@ -3,7 +3,8 @@ import type { Scraper, ScrapedOffre, ScrapeCriteria, ProgressEvent } from "../ba
 import { htmlToText } from "../base";
 import { parseDocument, largestTextBlockHtml, extractJobPostingLd, BROWSER_HEADERS, sleep } from "../dom";
 import { detectVie } from "@/lib/vie";
-import { isInHauteGaronne, ZONE_SEARCH_CITIES } from "@/lib/geo/haute-garonne";
+import { ZONE_SEARCH_CITIES } from "@/lib/geo/haute-garonne";
+import { keepInZone } from "@/lib/geo/zone-policy";
 import { CAREERS_MAX_PER_COMPANY } from "./workday-parse";
 
 // Safran : safran-group.com/fr/offres est rendu côté serveur (12 offres par page,
@@ -60,11 +61,12 @@ function descriptionHtml(doc: Document): string | null {
 export function parseSafranDetail(url: string, html: string): ScrapedOffre | null {
   const doc = parseDocument(html);
   const location = labeledValue(doc, "Emplacement");
-  if (!isInHauteGaronne(location)) return null;
   const title = (doc.querySelector("h1")?.textContent ?? "").replace(/\s+/g, " ").trim();
   if (!title) return null;
   const descHtml = descriptionHtml(doc) ?? "";
   const text = htmlToText(descHtml);
+  const contract = labeledValue(doc, "Type de contrat");
+  if (!keepInZone({ location, title, description_text: text, contract_type: contract })) return null;
   const published = (doc.body?.textContent ?? "").match(/Publié\s+(?:le\s+)?(\d{2})[./](\d{2})[./](\d{4})/);
   const id = url.match(/-(\d+)\/?$/)?.[1] ?? url;
   return {
@@ -74,7 +76,7 @@ export function parseSafranDetail(url: string, html: string): ScrapedOffre | nul
     company: labeledValue(doc, "Société") || "Safran",
     country: "France",
     location,
-    contract_type: labeledValue(doc, "Type de contrat"),
+    contract_type: contract,
     salary: null,
     description_html: descHtml,
     description_text: text,
@@ -88,15 +90,16 @@ export function parseSafranDetail(url: string, html: string): ScrapedOffre | nul
 
 export const safranScraper: Scraper = {
   name: SOURCE,
-  async *scrape(_criteria: ScrapeCriteria, onEvent: (e: ProgressEvent) => void) {
+  async *scrape(criteria: ScrapeCriteria, onEvent: (e: ProgressEvent) => void) {
     onEvent({ kind: "start", source: SOURCE });
     const urls = new Set<string>();
-    for (const city of ZONE_SEARCH_CITIES.slice(0, 8)) {
+    // Mots-clés prioritaires (« graduate ») d'abord, puis les villes du 31.
+    for (const city of [...(criteria.priorityKeywords ?? []), ...ZONE_SEARCH_CITIES.slice(0, 8)]) {
       for (let page = 0; page < MAX_PAGES && urls.size < CAREERS_MAX_PER_COMPANY; page++) {
         const params = new URLSearchParams({ search: city, page: String(page) });
         const res = await fetch(`${BASE}/fr/offres?${params}`, { headers: BROWSER_HEADERS });
         if (!res.ok) {
-          if (urls.size === 0 && page === 0 && city === ZONE_SEARCH_CITIES[0]) {
+          if (urls.size === 0 && page === 0) {
             throw new Error(`Safran : HTTP ${res.status}`);
           }
           break;

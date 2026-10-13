@@ -250,7 +250,10 @@ export const francetravailScraper: Scraper = {
     }
 
     const max = criteria.maxOffres ?? 50;
-    const queries = criteria.sectors.length ? criteria.sectors : [""];
+    const queries = [
+      ...(criteria.priorityKeywords ?? []),
+      ...(criteria.sectors.length ? criteria.sectors : [""]),
+    ];
 
     // Stratégie 1 : API officielle (descriptions complètes, aucun fetch détail nécessaire)
     const apiOffres = new Map<string, ScrapedOffre>();

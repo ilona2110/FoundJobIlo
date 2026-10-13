@@ -28,7 +28,7 @@ export function PreferencesForm() {
     }
     const p: ProfileFull = JSON.parse(raw);
     if (!p.sources_enabled?.length) p.sources_enabled = [...DEFAULT_SOURCE_IDS];
-    if (!p.preferred_contracts?.length) p.preferred_contracts = ["cdi", "cdd"];
+    if (!p.preferred_contracts?.length) p.preferred_contracts = ["graduate", "cdi", "cdd"];
     setProfile(p);
   }, [router]);
 
@@ -135,6 +135,7 @@ export function PreferencesForm() {
         <div className="flex flex-wrap gap-2">
           {(
             [
+              ["graduate", "Graduate programme"],
               ["cdi", "CDI"],
               ["cdd", "CDD"],
               ["vie", "V.I.E"],

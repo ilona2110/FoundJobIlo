@@ -1,6 +1,6 @@
 import "server-only";
 import type { ProfileFull, Language } from "@/lib/cv/types";
-import { classifyContract, type ContractCategory } from "@/lib/contracts";
+import { classifyContract, CONTRACT_LABELS, type ContractCategory } from "@/lib/contracts";
 
 export type ScoreResult = {
   score: number;
@@ -283,9 +283,11 @@ export function scoreOffreLocal(
   const durationBonus = (duration.score / 100) * 5;   // up to +5
   // Contrat : centré sur 50 → contrat recherché (preferred_contracts) +10, inconnu 0, identifié mais non recherché −6
   const contractDelta = ((contract.score - 50) / 50) * 10;
+  // Graduate programme recherché : +10 de plus, pour qu'il passe devant les CDI classiques.
+  const graduateBonus = contract.category === "graduate" && contract.score === 100 ? 10 : 0;
 
   const finalScore = Math.round(
-    Math.max(0, Math.min(100, base + languageBonus + durationBonus + contractDelta))
+    Math.max(0, Math.min(100, base + languageBonus + durationBonus + contractDelta + graduateBonus))
   );
 
   // Build human-readable reason
@@ -302,9 +304,9 @@ export function scoreOffreLocal(
   if (duration.months && duration.score >= 60)
     parts.push(`durée ${duration.months} mois`);
   if (contract.score === 100)
-    parts.push(`${contract.category.toUpperCase()} recherché`);
+    parts.push(`${CONTRACT_LABELS[contract.category]} recherché`);
   else if (contract.score === 20)
-    parts.push(`${contract.category} (non ciblé)`);
+    parts.push(`${CONTRACT_LABELS[contract.category]} (non ciblé)`);
   const reason = parts.length ? parts.join(" · ") : "Faible recouvrement avec votre profil";
 
   return {

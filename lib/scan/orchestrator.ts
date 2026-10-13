@@ -6,7 +6,8 @@ import { scoreOffresLocal } from "@/lib/scoring/local";
 import { getProfile } from "@/lib/db/queries";
 import { getDb } from "@/lib/db";
 import type { ProgressEvent } from "@/lib/scrapers/base";
-import { isInHauteGaronne, ZONE_LABEL } from "@/lib/geo/haute-garonne";
+import { ZONE_LABEL } from "@/lib/geo/haute-garonne";
+import { keepInZone } from "@/lib/geo/zone-policy";
 
 export type OrchestratorEvent =
   | ProgressEvent
@@ -81,6 +82,8 @@ export async function* runScan(
         // La zone est en France : les sources nationales cherchent en France, puis on filtre.
         countries: ["France"],
         zone: ZONE_LABEL,
+        // Graduate programmes recherchés : cherchés en premier sur chaque source.
+        priorityKeywords: profile.preferred_contracts?.includes("graduate") ? ["graduate"] : [],
       };
       const progressQueue: ProgressEvent[] = [];
       const onEvent = (e: ProgressEvent) => progressQueue.push(e);
@@ -94,7 +97,7 @@ export async function* runScan(
           yield ev;
         }
 
-        if (!isInHauteGaronne(offre.location)) {
+        if (!keepInZone(offre)) {
           outsideZone++;
           continue;
         }
@@ -145,15 +148,16 @@ export function removeOffresOutsideZone(): number {
   const db = getDb();
   const rows = db
     .prepare(
-      `SELECT o.id, o.location FROM offres o
+      `SELECT o.id, o.location, o.title, o.contract_type, substr(o.description_text, 1, 1500) AS description_text
+       FROM offres o
        WHERE NOT EXISTS (SELECT 1 FROM candidatures c WHERE c.offre_id = o.id)
          AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.offre_id = o.id)`
     )
-    .all() as { id: number; location: string | null }[];
+    .all() as { id: number; location: string | null; title: string; contract_type: string | null; description_text: string | null }[];
   const del = db.prepare("DELETE FROM offres WHERE id = ?");
   let n = 0;
   for (const r of rows) {
-    if (isInHauteGaronne(r.location)) continue;
+    if (keepInZone(r)) continue;
     del.run(r.id);
     n++;
   }

@@ -28,9 +28,32 @@ export function getDb(): DatabaseSync {
   } catch {}
 
   migrateCareerSources(db);
+  migrateGraduatePreference(db);
 
   _db = db;
   return db;
+}
+
+/**
+ * Une seule fois par base : ajoute « Graduate programme » aux contrats recherchés des
+ * profils existants (FoundJobIlo cible les graduate programmes). Décochable ensuite.
+ */
+function migrateGraduatePreference(db: DatabaseSync): void {
+  const KEY = "migration.graduate_preference";
+  if (db.prepare("SELECT 1 FROM settings WHERE key = ?").get(KEY)) return;
+  const rows = db.prepare("SELECT id, preferred_contracts FROM profile").all() as {
+    id: number;
+    preferred_contracts: string;
+  }[];
+  for (const row of rows) {
+    const current = parseJson<string[]>(row.preferred_contracts, ["cdi", "cdd"]);
+    if (current.includes("graduate")) continue;
+    db.prepare("UPDATE profile SET preferred_contracts = ? WHERE id = ?").run(
+      JSON.stringify(["graduate", ...current]),
+      row.id
+    );
+  }
+  db.prepare("INSERT INTO settings(key, value) VALUES(?, '1') ON CONFLICT(key) DO NOTHING").run(KEY);
 }
 
 /**

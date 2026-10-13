@@ -1,6 +1,6 @@
 # FoundJobIlo
 
-Version personnelle de [JobScout](https://github.com/latenightsbeats1208-pixel/jobscout) (licence MIT), recentrée sur la **Haute-Garonne** : seules les offres situées dans le département 31 sont gardées, et les sites carrières d'Airbus (avec ATR), Safran, Thales, Capgemini, Accenture et Renault Group sont interrogés directement. Voir « [Zone Haute-Garonne et sites carrières](#zone-haute-garonne-et-sites-carrières) ».
+Version personnelle de [JobScout](https://github.com/latenightsbeats1208-pixel/jobscout) (licence MIT), recentrée sur la **Haute-Garonne** : seules les offres situées dans le département 31 sont gardées, et les sites carrières d'Airbus (avec ATR), Safran, Thales, Capgemini, Accenture et Renault Group sont interrogés directement. Les **graduate programmes** sont repérés, filtrables et mis en avant. Voir « [Zone Haute-Garonne et sites carrières](#zone-haute-garonne-et-sites-carrières) ».
 
 Trouvez des offres d'emploi grâce à un scan multi-plateformes, triez-les avec un score calculé sur votre vrai profil, et générez pour chacune un CV et une lettre de motivation d'une page (compatibles ATS), sans jamais inventer une compétence que vous n'avez pas.
 
@@ -100,6 +100,12 @@ WTTJ est interrogée avec la clé de recherche (lecture seule) qu'utilise l'inte
 | Safran | Pages de safran-group.com/fr/offres (recherche par ville du 31, puis lecture de chaque offre) |
 
 Au plus 300 offres par entreprise et par scan. Pour ajouter une entreprise hébergée par Workday, ajoutez une ligne dans `lib/scrapers/careers/index.ts` et une entrée dans `lib/sources-meta.ts`.
+
+**Graduate programmes** : une offre est classée « Graduate programme » d'après son intitulé (« Graduate Programme », « Graduate Engineer », « Programme Jeunes Diplômés », « Leadership Development Program »…) ou une mention explicite au début de sa description (`lib/contracts.ts`). Ils ont leur filtre dans la liste des offres et leur case dans Profil › Recherche › Contrats recherchés, cochée par défaut. Quand elle est cochée :
+
+- chaque source cherche « graduate » en premier, avant le plafond de 300 offres ;
+- un graduate programme reçoit +10 points de score en plus du bonus de contrat recherché ;
+- un graduate programme au lieu générique (« France », « 3 Locations ») est gardé, car ces programmes se déroulent souvent en partie à Toulouse ; situé explicitement ailleurs (Paris, Hambourg), il est écarté (`lib/geo/zone-policy.ts`).
 
 **Pas encore pris en charge** : Sopra Steria, CNES, Liebherr Aerospace et Aumovio (ex-Continental Automotive). Leurs sites carrières n'exposent ni API publique ni pages lisibles sans navigateur. Leurs offres arrivent souvent par France Travail, désormais limitée à la Haute-Garonne.
 

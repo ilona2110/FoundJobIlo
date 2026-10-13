@@ -4,6 +4,7 @@ import { htmlToText } from "../base";
 import { sleep } from "../dom";
 import { detectVie } from "@/lib/vie";
 import { isInHauteGaronne, ZONE_SEARCH_CITIES } from "@/lib/geo/haute-garonne";
+import { keepInZone } from "@/lib/geo/zone-policy";
 import {
   CAREERS_MAX_PER_COMPANY,
   CAREERS_HEADERS,
@@ -82,21 +83,27 @@ function isMultiLocation(text: string): boolean {
 
 async function collectPaths(
   s: WorkdaySite,
+  priorityKeywords: string[],
   log: (msg: string) => void
 ): Promise<string[]> {
   const first = await postJobs(s, { appliedFacets: {}, searchText: "", offset: 0, limit: PAGE_SIZE });
   const zone = findZoneFacets(first.facets ?? []);
   const paths = new Map<string, string>();
 
-  const runQuery = async (appliedFacets: Record<string, string[]>, searchText: string) => {
-    for (let offset = 0; offset < 2000 && paths.size < CAREERS_MAX_PER_COMPANY; offset += PAGE_SIZE) {
+  const runQuery = async (appliedFacets: Record<string, string[]>, searchText: string, maxPages = 100) => {
+    for (
+      let offset = 0;
+      offset < maxPages * PAGE_SIZE && paths.size < CAREERS_MAX_PER_COMPANY;
+      offset += PAGE_SIZE
+    ) {
       const page = await postJobs(s, { appliedFacets, searchText, offset, limit: PAGE_SIZE });
       const postings = page.jobPostings ?? [];
       for (const p of postings) {
         if (!p.externalPath || paths.has(p.externalPath)) continue;
         const where = p.locationsText ?? "";
         // Écarte tout de suite les offres clairement ailleurs (évite un appel détail inutile).
-        if (where && !isMultiLocation(where) && !isInHauteGaronne(where)) continue;
+        // (Un graduate programme au lieu générique, « France », est gardé : voir zone-policy.)
+        if (where && !isMultiLocation(where) && !keepInZone({ location: where, title: p.title ?? "" })) continue;
         paths.set(p.externalPath, where);
         if (paths.size >= CAREERS_MAX_PER_COMPANY) break;
       }
@@ -105,6 +112,13 @@ async function collectPaths(
       await sleep(250);
     }
   };
+
+  // Mots-clés prioritaires (« graduate ») d'abord, pour qu'ils ne soient jamais coupés
+  // par le plafond d'offres : dans la zone, puis partout (programmes au lieu générique).
+  for (const kw of priorityKeywords) {
+    if (zone) await runQuery({ [zone.parameter]: zone.ids }, kw);
+    await runQuery({}, kw, 5);
+  }
 
   if (zone) {
     log(`filtre Workday « ${zone.parameter} » : ${zone.labels.join(", ")}`);
@@ -125,11 +139,12 @@ export function detailToOffre(s: WorkdaySite, path: string, d: WorkdayDetail): S
   const locations = [info.location, ...(info.additionalLocations ?? [])].filter(
     (l): l is string => !!l && l.trim().length > 0
   );
-  const inZone = locations.filter((l) => isInHauteGaronne(l));
-  if (!inZone.length) return null;
-
   const html = info.jobDescription ?? "";
   const text = htmlToText(html);
+  const inZone = locations.filter((l) => isInHauteGaronne(l));
+  const where = inZone.length ? inZone.join(" · ") : locations.join(", ") || null;
+  if (!inZone.length && !keepInZone({ location: where, title: info.title, description_text: text })) return null;
+
   const url = info.externalUrl || `https://${s.host}/fr-FR/${s.site}${path}`;
   return {
     source_id: info.jobReqId || info.id || path,
@@ -137,7 +152,7 @@ export function detailToOffre(s: WorkdaySite, path: string, d: WorkdayDetail): S
     title: info.title.trim(),
     company: d.hiringOrganization?.name?.trim() || s.company,
     country: "France",
-    location: inZone.join(" · "),
+    location: where,
     contract_type: null,
     salary: null,
     description_html: html,
@@ -153,9 +168,9 @@ export function detailToOffre(s: WorkdaySite, path: string, d: WorkdayDetail): S
 export function createWorkdayScraper(s: WorkdaySite): Scraper {
   return {
     name: s.id,
-    async *scrape(_criteria: ScrapeCriteria, onEvent: (e: ProgressEvent) => void) {
+    async *scrape(criteria: ScrapeCriteria, onEvent: (e: ProgressEvent) => void) {
       onEvent({ kind: "start", source: s.id });
-      const paths = await collectPaths(s, (msg) => console.log(`[${s.id}] ${msg}`));
+      const paths = await collectPaths(s, criteria.priorityKeywords ?? [], (msg) => console.log(`[${s.id}] ${msg}`));
       onEvent({ kind: "list", source: s.id, total: paths.length });
 
       let ok = 0;

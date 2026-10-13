@@ -364,6 +364,7 @@ function SearchCard({
       <div className="flex flex-wrap gap-1.5 mb-4">
         {(
           [
+            ["graduate", "Graduate programme"],
             ["cdi", "CDI"],
             ["cdd", "CDD"],
             ["vie", "V.I.E"],
