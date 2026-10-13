@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
 import { dbPath } from "@/lib/paths";
+import { CAREER_SOURCE_IDS } from "@/lib/sources-meta";
 
 const DB_PATH = dbPath();
 
@@ -26,8 +27,56 @@ export function getDb(): DatabaseSync {
     );
   } catch {}
 
+  migrateCareerSources(db);
+  migrateGraduatePreference(db);
+
   _db = db;
   return db;
+}
+
+/**
+ * Une seule fois par base : ajoute « Graduate programme » aux contrats recherchés des
+ * profils existants (FoundJobIlo cible les graduate programmes). Décochable ensuite.
+ */
+function migrateGraduatePreference(db: DatabaseSync): void {
+  const KEY = "migration.graduate_preference";
+  if (db.prepare("SELECT 1 FROM settings WHERE key = ?").get(KEY)) return;
+  const rows = db.prepare("SELECT id, preferred_contracts FROM profile").all() as {
+    id: number;
+    preferred_contracts: string;
+  }[];
+  for (const row of rows) {
+    const current = parseJson<string[]>(row.preferred_contracts, ["cdi", "cdd"]);
+    if (current.includes("graduate")) continue;
+    db.prepare("UPDATE profile SET preferred_contracts = ? WHERE id = ?").run(
+      JSON.stringify(["graduate", ...current]),
+      row.id
+    );
+  }
+  db.prepare("INSERT INTO settings(key, value) VALUES(?, '1') ON CONFLICT(key) DO NOTHING").run(KEY);
+}
+
+/**
+ * Une seule fois par base : coche les sites carrières (Airbus, Safran…) dans un profil
+ * déjà enregistré, pour qu'ils soient scannés sans repasser par Profil › Recherche.
+ * Une source décochée ensuite par l'utilisatrice le reste.
+ */
+function migrateCareerSources(db: DatabaseSync): void {
+  const KEY = "migration.career_sources";
+  const done = db.prepare("SELECT 1 FROM settings WHERE key = ?").get(KEY);
+  if (done) return;
+  const rows = db.prepare("SELECT id, sources_enabled FROM profile").all() as {
+    id: number;
+    sources_enabled: string;
+  }[];
+  for (const row of rows) {
+    const current = parseJson<string[]>(row.sources_enabled, []);
+    // Profil sans source : l'orchestrateur prend déjà les sources par défaut, sites carrières compris.
+    if (!current.length) continue;
+    const merged = Array.from(new Set([...current, ...CAREER_SOURCE_IDS]));
+    db.prepare("UPDATE profile SET sources_enabled = ? WHERE id = ?").run(JSON.stringify(merged), row.id);
+  }
+  db.prepare("INSERT INTO settings(key, value) VALUES(?, '1') ON CONFLICT(key) DO NOTHING").run(KEY);
 }
 
 export function transaction<T>(fn: () => T): T {

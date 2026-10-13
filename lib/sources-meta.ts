@@ -24,9 +24,20 @@ export type SourceMeta = {
    * par défaut et ne s'active que par un choix explicite de l'utilisateur (CGU.md, § 5 et 6).
    */
   optIn?: boolean;
+  /** Site carrières d'une entreprise (lib/scrapers/careers), filtré sur la Haute-Garonne. */
+  career?: boolean;
 };
 
+/** Sites carrières d'entreprises, interrogés directement (offres en Haute-Garonne uniquement). */
+const CAREER_SITE = "Site carrières · Haute-Garonne";
+
 export const SOURCES_META: SourceMeta[] = [
+  { id: "airbus", label: "Airbus", sublabel: `${CAREER_SITE} · avec ATR`, scope: "fr", career: true },
+  { id: "safran", label: "Safran", sublabel: CAREER_SITE, scope: "fr", career: true },
+  { id: "thales", label: "Thales", sublabel: CAREER_SITE, scope: "fr", career: true },
+  { id: "capgemini", label: "Capgemini", sublabel: CAREER_SITE, scope: "fr", career: true },
+  { id: "accenture", label: "Accenture", sublabel: CAREER_SITE, scope: "fr", career: true },
+  { id: "renault", label: "Renault Group", sublabel: CAREER_SITE, scope: "fr", career: true },
   { id: "wttj", label: "Welcome to the Jungle", sublabel: "Startups & scale-ups · à activer vous-même", scope: "world", optIn: true },
   {
     id: "linkedin",
@@ -56,10 +67,13 @@ export const SOURCES_META: SourceMeta[] = [
 
 export const SOURCE_IDS = SOURCES_META.map((s) => s.id);
 
+/** Sites carrières d'entreprises (Airbus, Safran…). */
+export const CAREER_SOURCE_IDS = SOURCES_META.filter((s) => s.career).map((s) => s.id);
+
 /**
  * Sources cochées par défaut : toutes sauf celles qui exigent un téléchargement
  * supplémentaire, celles qui sont hors service et celles dont les conditions
- * interdisent l'extraction automatisée (opt-in). Depuis la 3.4.13 : France Travail seule.
+ * interdisent l'extraction automatisée (opt-in) : France Travail et les sites carrières.
  */
 export const DEFAULT_SOURCE_IDS = SOURCES_META.filter((s) => !s.requiresEngine && !s.unavailable && !s.optIn).map(
   (s) => s.id

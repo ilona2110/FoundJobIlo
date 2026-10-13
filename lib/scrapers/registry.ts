@@ -7,8 +7,10 @@ import { apecScraper } from "./apec";
 import { helloworkScraper } from "./hellowork";
 import { francetravailScraper } from "./francetravail";
 import { talentScraper } from "./talent";
+import { careerScrapers } from "./careers";
 
 export const scrapers: Record<string, Scraper> = {
+  ...careerScrapers,
   wttj: wttjScraper,
   linkedin: linkedinScraper,
   civiweb: civiwebScraper,

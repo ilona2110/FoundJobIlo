@@ -6,6 +6,8 @@ import { scoreOffresLocal } from "@/lib/scoring/local";
 import { getProfile } from "@/lib/db/queries";
 import { getDb } from "@/lib/db";
 import type { ProgressEvent } from "@/lib/scrapers/base";
+import { ZONE_LABEL } from "@/lib/geo/haute-garonne";
+import { keepInZone } from "@/lib/geo/zone-policy";
 
 export type OrchestratorEvent =
   | ProgressEvent
@@ -57,15 +59,32 @@ export async function* runScan(
 
   let totalInserted = 0;
 
+  // Zone de recherche : Haute-Garonne uniquement. Les offres déjà en base hors de la zone
+  // (scans précédents) sont retirées, sauf si une candidature ou un document s'y rattache.
+  const removed = removeOffresOutsideZone();
+  if (removed > 0) {
+    const msg = `${removed} offre(s) hors ${ZONE_LABEL} retirée(s) de la liste.`;
+    log.push(msg);
+    onLog(msg);
+  }
+
   for (const scraper of scrapers) {
     let seen = 0;
     let okCount = 0;
     let failCount = 0;
+    let outsideZone = 0;
     const buffer: { id: number; offre: any }[] = [];
     const pendingScoring: OrchestratorEvent[] = [];
 
     try {
-      const criteria = { sectors: profile.sectors, countries: profile.target_countries };
+      const criteria = {
+        sectors: profile.sectors,
+        // La zone est en France : les sources nationales cherchent en France, puis on filtre.
+        countries: ["France"],
+        zone: ZONE_LABEL,
+        // Graduate programmes recherchés : cherchés en premier sur chaque source.
+        priorityKeywords: profile.preferred_contracts?.includes("graduate") ? ["graduate"] : [],
+      };
       const progressQueue: ProgressEvent[] = [];
       const onEvent = (e: ProgressEvent) => progressQueue.push(e);
 
@@ -78,6 +97,10 @@ export async function* runScan(
           yield ev;
         }
 
+        if (!keepInZone(offre)) {
+          outsideZone++;
+          continue;
+        }
         const id = upsertOffreFromSource(scraper.name, offre);
         if (offre.description_status === "ok") {
           totalInserted++;
@@ -109,7 +132,9 @@ export async function* runScan(
       log.push(`[${scraper.name}] erreur fatale: ${msg}`);
       yield { kind: "error", source: scraper.name, message: msg };
     }
-    const summary = `[${scraper.name}] ${seen || okCount + failCount} vues, ${okCount} insérées, ${failCount} échecs`;
+    const summary = `[${scraper.name}] ${seen || okCount + failCount} vues, ${okCount} insérées, ${failCount} échecs${
+      outsideZone ? `, ${outsideZone} hors ${ZONE_LABEL} ignorées` : ""
+    }`;
     log.push(summary);
     onLog(summary);
     flush();
@@ -117,6 +142,26 @@ export async function* runScan(
 
   db.prepare("UPDATE scan_runs SET status = 'done', finished_at = datetime('now') WHERE id = ?").run(runId);
   yield { kind: "global-done", total_inserted: totalInserted };
+}
+
+export function removeOffresOutsideZone(): number {
+  const db = getDb();
+  const rows = db
+    .prepare(
+      `SELECT o.id, o.location, o.title, o.contract_type, substr(o.description_text, 1, 1500) AS description_text
+       FROM offres o
+       WHERE NOT EXISTS (SELECT 1 FROM candidatures c WHERE c.offre_id = o.id)
+         AND NOT EXISTS (SELECT 1 FROM documents d WHERE d.offre_id = o.id)`
+    )
+    .all() as { id: number; location: string | null; title: string; contract_type: string | null; description_text: string | null }[];
+  const del = db.prepare("DELETE FROM offres WHERE id = ?");
+  let n = 0;
+  for (const r of rows) {
+    if (keepInZone(r)) continue;
+    del.run(r.id);
+    n++;
+  }
+  return n;
 }
 
 async function scoreBatch(

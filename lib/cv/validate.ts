@@ -104,7 +104,7 @@ export function buildProfileFromExtraction(
     target_countries: [],
     sources_enabled: [],
     // Même défaut que le schéma zod, la colonne SQL et l'écran de préférences.
-    preferred_contracts: ["cdi", "cdd"],
+    preferred_contracts: ["graduate", "cdi", "cdd"],
     extraction_confidence: computeConfidence(ex),
     experiences: expCleaned,
     educations,

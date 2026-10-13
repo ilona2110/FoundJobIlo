@@ -27,7 +27,12 @@ export const linkedinScraper: Scraper = {
       const seen = new Set<string>();
       const cards: ListingCard[] = [];
 
-      const countries = criteria.countries.length ? criteria.countries : [""];
+      // Zone visée (Haute-Garonne) : LinkedIn reconnaît « Haute-Garonne, Occitanie, France ».
+      const countries = criteria.zone
+        ? [`${criteria.zone}, Occitanie, France`]
+        : criteria.countries.length
+          ? criteria.countries
+          : [""];
       // 2 pages max par combinaison secteur×pays : avec une liste de pays large
       // (ex. francophonie), on couvre chaque pays au lieu d'épuiser le budget
       // sur la première combinaison.

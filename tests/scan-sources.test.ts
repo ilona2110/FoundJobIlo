@@ -86,8 +86,9 @@ describe("runScan — sources scannées", () => {
   });
 
   it("les sources par défaut excluent LinkedIn (moteur), les suspendues et les sources opt-in", () => {
-    // 3.4.13 : seules les sources dont les conditions n'interdisent pas l'extraction automatisée.
-    expect(DEFAULT_SOURCE_IDS).toEqual(["francetravail"]);
+    // 3.4.13 : seules les sources dont les conditions n'interdisent pas l'extraction automatisée,
+    // plus les sites carrières (Haute-Garonne).
+    expect(DEFAULT_SOURCE_IDS).toEqual(["airbus", "safran", "thales", "capgemini", "accenture", "renault", "francetravail"]);
     for (const id of ["linkedin", "civiweb", "apec", "wttj", "hellowork", "talent"]) {
       expect(DEFAULT_SOURCE_IDS).not.toContain(id);
     }
