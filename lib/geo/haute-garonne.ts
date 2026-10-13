@@ -8,6 +8,9 @@
 // l'utilisatrice ne veut QUE des offres en Haute-Garonne.
 
 import { HAUTE_GARONNE_COMMUNES } from "./haute-garonne-communes";
+import type { ZoneArea } from "./areas";
+
+export type { ZoneArea } from "./areas";
 
 export const ZONE_LABEL = "Haute-Garonne";
 export const ZONE_DEPARTEMENT = "31";
@@ -78,6 +81,8 @@ const COMMUNES: CommuneKey[] = HAUTE_GARONNE_COMMUNES.map(([name, population, ho
   return { key, population, homonym: homonym === 1, exactOnly: EXACT_ONLY.has(key) };
 });
 const COMMUNE_KEYS = new Set(COMMUNES.map((c) => c.key));
+/** Du nom le plus long au plus court : « Vieille-Toulouse » est reconnue avant « Toulouse ». */
+const COMMUNES_LONGEST_FIRST = COMMUNES.slice().sort((a, b) => b.key.length - a.key.length);
 
 /** Éléments du lieu (séparés par des virgules), sans les mots qui n'aident pas à situer. */
 function segments(norm: string): string[] {
@@ -87,7 +92,7 @@ function segments(norm: string): string[] {
       s
         .replace(/\bcedex\b( \d+)?/g, " ")
         .replace(/\b(france|fr|occitanie|haute garonne|midi pyrenees|area|region|metropolitan|greater|et peripherie)\b/g, " ")
-        .replace(/\b\d{5}\b/g, " ")
+        .replace(/\b\d{2,5}\b/g, " ")
         .replace(/\s+/g, " ")
         .trim()
     )
@@ -114,41 +119,100 @@ function containsCommune(norm: string, key: string): boolean {
   }
 }
 
-export function isInHauteGaronne(location: string | null | undefined): boolean {
-  if (!location || !location.trim()) return false;
-  const raw = location;
+type LocationSignals = {
+  norm: string;
+  /** Mention explicite de la Haute-Garonne : texte, code postal 31xxx ou département 31. */
+  explicit31: boolean;
+  /** Code postal ou département d'un AUTRE département. */
+  otherCodes: boolean;
+  /** Codes postaux trouvés. */
+  postal: string[];
+};
+
+function signals(raw: string): LocationSignals {
   const norm = normalizeLocation(raw);
-
-  if (norm.includes(" haute garonne ")) return true;
-
-  // Codes postaux : 31xxx = Haute-Garonne.
   const postal = Array.from(raw.matchAll(/(?<!\d)(\d{5})(?!\d)/g)).map((m) => m[1]);
-  if (postal.some((p) => p.startsWith(ZONE_DEPARTEMENT))) return true;
-
   // Numéros de département : « (31) », « 31 - TOULOUSE » (France Travail), « Toulouse - 31 ».
   const depts = [
     ...Array.from(raw.matchAll(/\((\d{2}|2[AB]|97\d)\)/g)).map((m) => m[1]),
     ...Array.from(raw.matchAll(/(?:^|[\s,])(\d{2}|2[AB])\s*[-–]\s/g)).map((m) => m[1]),
     ...Array.from(raw.matchAll(/\s[-–]\s*(\d{2}|2[AB])\s*$/g)).map((m) => m[1]),
   ];
-  if (depts.includes(ZONE_DEPARTEMENT)) return true;
-  const otherCodes = postal.length > 0 || depts.length > 0;
+  const explicit31 =
+    norm.includes(" haute garonne ") ||
+    postal.some((p) => p.startsWith(ZONE_DEPARTEMENT)) ||
+    depts.includes(ZONE_DEPARTEMENT);
+  const otherCodes =
+    postal.some((p) => !p.startsWith(ZONE_DEPARTEMENT)) || depts.some((d) => d !== ZONE_DEPARTEMENT);
+  return { norm, explicit31, otherCodes, postal };
+}
+
+/**
+ * Communes de Haute-Garonne nommées dans un lieu (clés normalisées : « toulouse »,
+ * « saint orens de gameville »). Les codes postaux de Toulouse (31000 à 31500) comptent
+ * pour « toulouse ».
+ */
+export function matchedCommunes(location: string | null | undefined): string[] {
+  if (!location || !location.trim()) return [];
+  const sig = signals(location);
+  const { norm } = sig;
+  const out = new Set<string>();
+  if (sig.postal.some((p) => TOULOUSE_POSTAL_CODES.has(p))) out.add("toulouse");
 
   const segs = new Set(segments(norm));
-  const hasContext = CONTEXT_RE.test(norm);
+  const hasContext = CONTEXT_RE.test(norm) || sig.explicit31;
   // Pour un nom ambigu, tous les éléments du lieu doivent être des communes du 31
   // (« Grenade, Espagne » ou « Saint-Jean (Savoie) » sont écartés).
   const onlyCommunes = Array.from(segs).every((s) => COMMUNE_KEYS.has(s));
 
-  for (const c of COMMUNES) {
+  // Texte restant : un nom reconnu en est retiré, pour que « Vieille-Toulouse » ne compte
+  // pas aussi comme « Toulouse ».
+  let rest = norm;
+  for (const c of COMMUNES_LONGEST_FIRST) {
     const exact = segs.has(c.key);
     if (c.homonym || c.exactOnly) {
-      if (!exact || otherCodes || !onlyCommunes) continue;
+      if (!exact || !onlyCommunes) continue;
+      if (sig.otherCodes && !sig.explicit31) continue;
       if (c.homonym && !hasContext && c.population < HOMONYM_TRUST_POPULATION) continue;
-      return true;
+      out.add(c.key);
+      continue;
     }
     // Les noms très courts (« Ore », « Bax ») ne sont reconnus qu'en élément complet.
-    if (c.key.length < 5 ? exact : exact || containsCommune(norm, c.key)) return true;
+    if (c.key.length < 5 ? exact : containsCommune(rest, c.key)) {
+      out.add(c.key);
+      rest = rest.split(` ${c.key} `).join(" , ");
+    }
   }
-  return false;
+  return Array.from(out);
+}
+
+export function isInHauteGaronne(location: string | null | undefined): boolean {
+  if (!location || !location.trim()) return false;
+  if (signals(location).explicit31) return true;
+  return matchedCommunes(location).length > 0;
+}
+
+// ----------- Secteurs de la zone (filtre « Lieu » de la liste des offres) -----------
+
+/** Codes postaux de la ville de Toulouse. */
+const TOULOUSE_POSTAL_CODES = new Set(["31000", "31100", "31200", "31300", "31400", "31500"]);
+
+/** Les 37 communes de Toulouse Métropole (EPCI 243100518, @etalab/decoupage-administratif). */
+const TOULOUSE_METROPOLE = new Set(
+  [
+    "Aigrefeuille", "Aucamville", "Aussonne", "Balma", "Beaupuy", "Beauzelle", "Blagnac", "Brax",
+    "Bruguières", "Castelginest", "Colomiers", "Cornebarrieu", "Cugnaux", "Drémil-Lafage", "Fenouillet",
+    "Flourens", "Fonbeauzard", "Gagnac-sur-Garonne", "Gratentour", "L'Union", "Launaguet", "Lespinasse",
+    "Mondonville", "Mondouzil", "Mons", "Montrabé", "Pibrac", "Pin-Balma", "Quint-Fonsegrives",
+    "Saint-Alban", "Saint-Jean", "Saint-Jory", "Saint-Orens-de-Gameville", "Seilh", "Toulouse",
+    "Tournefeuille", "Villeneuve-Tolosane",
+  ].map((n) => normalizeLocation(n).trim())
+);
+
+
+/** Vrai si l'offre est à Toulouse même, ou dans une commune de Toulouse Métropole. */
+export function isInArea(location: string | null | undefined, area: ZoneArea): boolean {
+  const communes = matchedCommunes(location);
+  if (area === "toulouse") return communes.includes("toulouse");
+  return communes.some((c) => TOULOUSE_METROPOLE.has(c));
 }

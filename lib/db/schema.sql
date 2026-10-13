@@ -83,6 +83,8 @@ CREATE TABLE IF NOT EXISTS offres (
   description_status TEXT NOT NULL DEFAULT 'ok',
   posted_at TEXT,
   scraped_at TEXT NOT NULL DEFAULT (datetime('now')),
+  -- Première fois que l'offre a été vue (scraped_at, lui, change à chaque scan).
+  first_seen_at TEXT DEFAULT (datetime('now')),
   score INTEGER DEFAULT 0,
   score_breakdown TEXT,
   is_vie INTEGER NOT NULL DEFAULT 0,

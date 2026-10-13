@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CONTRACT_ORDER, type ContractCategory } from "@/lib/contracts";
-import { parseMinScore, searchOffres, type OffersSort } from "@/lib/db/offres";
+import { parseMinScore, searchOffres, PUBLISHED_DAYS, type OffersPublished, type OffersSort } from "@/lib/db/offres";
 
 export const runtime = "nodejs";
 
@@ -20,6 +20,8 @@ export async function GET(req: NextRequest) {
     minScore: parseMinScore(params.get("minScore")),
     // ?vie=1 (lien de l'accueil) : même règle que la puce contrat « V.I.E ».
     vieOnly: params.get("vie") === "1",
+    published: (Object.keys(PUBLISHED_DAYS) as OffersPublished[]).find((k) => k === params.get("published")),
+    area: params.get("area") === "toulouse" || params.get("area") === "metropole" ? (params.get("area") as "toulouse" | "metropole") : undefined,
     sortBy,
     page: Number.isFinite(page) ? page : 1,
   });

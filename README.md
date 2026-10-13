@@ -107,6 +107,8 @@ Au plus 300 offres par entreprise et par scan. Pour ajouter une entreprise hébe
 - un graduate programme reçoit +10 points de score en plus du bonus de contrat recherché ;
 - un graduate programme au lieu générique (« France », « 3 Locations ») est gardé, car ces programmes se déroulent souvent en partie à Toulouse ; situé explicitement ailleurs (Paris, Hambourg), il est écarté (`lib/geo/zone-policy.ts`).
 
+**Filtres de la liste des offres** : « Publiées » (aujourd'hui, cette semaine = 7 derniers jours, ces 2 semaines = 14 derniers jours) et « Lieu » (Toulouse même, ou les 37 communes de Toulouse Métropole : Blagnac, Colomiers…). Une offre sans date de publication compte à partir du jour où FoundJobIlo l'a vue pour la première fois (`first_seen_at`).
+
 **Pas encore pris en charge** : Sopra Steria, CNES, Liebherr Aerospace et Aumovio (ex-Continental Automotive). Leurs sites carrières n'exposent ni API publique ni pages lisibles sans navigateur. Leurs offres arrivent souvent par France Travail, désormais limitée à la Haute-Garonne.
 
 ## Scoring des offres (local, déterministe, gratuit)

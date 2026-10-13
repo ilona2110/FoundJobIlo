@@ -7,7 +7,8 @@ import { ArrowRight, ArrowUpRight, Briefcase, CalendarDays, ChevronDown, MapPin,
 import { Chip } from "@/components/ui/chip";
 import { Badge } from "@/components/ui/badge";
 import { cn, formatRelativeDate, scoreColor } from "@/lib/utils";
-import type { OffreSummary, OffersSearch, OffersSort } from "@/lib/db/offres";
+import type { OffreSummary, OffersPublished, OffersSearch, OffersSort } from "@/lib/db/offres";
+import { ZONE_AREA_LABELS, type ZoneArea } from "@/lib/geo/areas";
 import { CONTRACT_LABELS, CONTRACT_ORDER, type ContractCategory } from "@/lib/contracts";
 import { SOURCES_META } from "@/lib/sources-meta";
 
@@ -28,6 +29,14 @@ function resultLabel(total: number, filtered: boolean): string {
   return total <= 1 ? `${total} offre à explorer` : `${numberFormat.format(total)} offres à explorer`;
 }
 
+const PUBLISHED_LABELS: Record<OffersPublished, string> = {
+  today: "Aujourd'hui",
+  week: "Cette semaine",
+  "2weeks": "Ces 2 semaines",
+};
+const PUBLISHED_ORDER: OffersPublished[] = ["today", "week", "2weeks"];
+const AREA_ORDER: ZoneArea[] = ["toulouse", "metropole"];
+
 /** Seuil de la puce de score, sauf arrivée par ?score=N (carte de l'accueil). */
 const DEFAULT_MIN_SCORE = 60;
 
@@ -44,6 +53,8 @@ export function OffresList({
   const [query, setQuery] = useState("");
   const [source, setSource] = useState("");
   const [country, setCountry] = useState("");
+  const [published, setPublished] = useState<OffersPublished | "">("");
+  const [area, setArea] = useState<ZoneArea | "">("");
   // ?vie=1 (carte de l'accueil) coche simplement la puce contrat « V.I.E » : une seule
   // règle (contract_category), un seul filtre à retirer.
   const [contracts, setContracts] = useState<Set<ContractCategory>>(() => new Set(initialVieOnly ? ["vie"] : []));
@@ -62,9 +73,10 @@ export function OffresList({
   const initialVieRef = useRef(initialVieOnly);
   const contractKey = [...contracts].sort().join(",");
   const vieFilter = contracts.has("vie");
-  const hasFilters = !!query || !!source || !!country || contracts.size > 0 || minScore;
-  const activeFilterCount = Number(!!source) + Number(!!country) + contracts.size + Number(minScore);
-  const { countries, sources, contractCounts } = result.facets;
+  const hasFilters = !!query || !!source || !!country || !!published || !!area || contracts.size > 0 || minScore;
+  const activeFilterCount =
+    Number(!!source) + Number(!!country) + Number(!!published) + Number(!!area) + contracts.size + Number(minScore);
+  const { countries, sources, contractCounts, publishedCounts, areaCounts } = result.facets;
   const shown = result.offers;
   const remaining = Math.max(0, result.total - shown.length);
   const selected = shown.find((offer) => offer.id === selectedId) ?? shown[0] ?? null;
@@ -113,6 +125,8 @@ export function OffresList({
     if (query) params.set("q", query);
     if (source) params.set("source", source);
     if (country) params.set("country", country);
+    if (published) params.set("published", published);
+    if (area) params.set("area", area);
     if (contractKey) params.set("contracts", contractKey);
     if (minScore) params.set("minScore", String(scoreThreshold));
     setLoading(true);
@@ -135,10 +149,10 @@ export function OffresList({
       }
     }, page > 1 ? 0 : query ? 250 : 0);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [query, source, country, contractKey, minScore, scoreThreshold, sortBy, page, refreshKey]);
+  }, [query, source, country, published, area, contractKey, minScore, scoreThreshold, sortBy, page, refreshKey]);
 
   function reset() {
-    setQuery(""); setSource(""); setCountry(""); setContracts(new Set()); setMinScore(false); setSelectedId(null); setFiltersExpanded(false); setPage(1);
+    setQuery(""); setSource(""); setCountry(""); setPublished(""); setArea(""); setContracts(new Set()); setMinScore(false); setSelectedId(null); setFiltersExpanded(false); setPage(1);
   }
 
   function toggleContract(contract: ContractCategory) {
@@ -191,10 +205,24 @@ export function OffresList({
             <option value="">Toutes les sources</option>
             {sources.map((item) => <option key={item} value={item}>{sourceLabels[item] ?? item}</option>)}
           </select>
-          <select value={country} onChange={(event) => { setCountry(event.target.value); setPage(1); }} aria-label="Filtrer par pays" className="h-9 max-w-full rounded-md border border-border bg-bg px-3 text-small text-text focus:border-accent focus:outline-none">
-            <option value="">Tous les pays</option>
-            {countries.map((item) => <option key={item} value={item}>{item}</option>)}
+          <select value={published} onChange={(event) => { setPublished(event.target.value as OffersPublished | ""); setPage(1); }} aria-label="Filtrer par date de publication" className="h-9 max-w-full rounded-md border border-border bg-bg px-3 text-small text-text focus:border-accent focus:outline-none">
+            <option value="">Publiées : toutes dates</option>
+            {PUBLISHED_ORDER.map((item) => (
+              <option key={item} value={item}>{PUBLISHED_LABELS[item]} ({numberFormat.format(publishedCounts?.[item] ?? 0)})</option>
+            ))}
           </select>
+          <select value={area} onChange={(event) => { setArea(event.target.value as ZoneArea | ""); setPage(1); }} aria-label="Filtrer par lieu" className="h-9 max-w-full rounded-md border border-border bg-bg px-3 text-small text-text focus:border-accent focus:outline-none">
+            <option value="">Lieu : toute la Haute-Garonne</option>
+            {AREA_ORDER.map((item) => (
+              <option key={item} value={item}>{ZONE_AREA_LABELS[item]} ({numberFormat.format(areaCounts?.[item] ?? 0)})</option>
+            ))}
+          </select>
+          {(countries.length > 1 || country) && (
+            <select value={country} onChange={(event) => { setCountry(event.target.value); setPage(1); }} aria-label="Filtrer par pays" className="h-9 max-w-full rounded-md border border-border bg-bg px-3 text-small text-text focus:border-accent focus:outline-none">
+              <option value="">Tous les pays</option>
+              {countries.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          )}
           {hasFilters && <button type="button" onClick={reset} className="inline-flex h-9 items-center gap-1.5 px-2 text-small font-semibold text-accent hover:underline"><RotateCcw className="h-3.5 w-3.5" /> Effacer les filtres</button>}
         </div>
         </div>

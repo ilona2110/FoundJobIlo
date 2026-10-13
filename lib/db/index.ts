@@ -27,6 +27,13 @@ export function getDb(): DatabaseSync {
     );
   } catch {}
 
+  // 3.4.15-ilo : date de première découverte d'une offre (filtre « Publiées »). Les offres
+  // déjà en base reprennent leur date de dernier scan, la meilleure estimation disponible.
+  try {
+    db.exec(`ALTER TABLE offres ADD COLUMN first_seen_at TEXT`);
+  } catch {}
+  db.exec(`UPDATE offres SET first_seen_at = scraped_at WHERE first_seen_at IS NULL`);
+
   migrateCareerSources(db);
   migrateGraduatePreference(db);
 
